@@ -1,0 +1,13 @@
+name: "operator"
+version: "0.1.0"
+usage: "Maintain helm release in standard procedure"
+description: |-
+  This plugin maintain helm release within git repository.
+ignoreFlags: false
+useTunnel: false
+command: "$HELM_PLUGIN_DIR/operator.sh"
+# platformCommand:
+#   - os: linux
+#     command: "$HELM_PLUGIN_DIR/operator.bash"
+#   - os: darwin
+#     command: "$HELM_PLUGIN_DIR/operator.zsh"
