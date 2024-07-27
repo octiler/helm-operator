@@ -6,8 +6,8 @@ description: |-
 ignoreFlags: false
 useTunnel: false
 command: "$HELM_PLUGIN_DIR/operator.sh"
-# platformCommand:
-#   - os: linux
-#     command: "$HELM_PLUGIN_DIR/operator.bash"
-#   - os: darwin
-#     command: "$HELM_PLUGIN_DIR/operator.zsh"
+platformCommand:
+  - os: linux
+    command: "$HELM_PLUGIN_DIR/operator.bash"
+  - os: darwin
+    command: "$HELM_PLUGIN_DIR/operator.zsh"

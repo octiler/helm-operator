@@ -1,0 +1,36 @@
+#!/bin/bash
+
+[[ $# -eq 1 ]] && cat << EOF && exit 0
+alter
+restart
+template
+install
+upgrade
+status
+list
+test
+history
+rollback
+uninstall
+EOF
+
+command=$1 && shift
+
+[[ $# -gt 1 ]] && shift || exit 0
+case $command in
+    "history" | "hist" | "rollback" | "status" | "test" | "uninstall" )
+        $HELM_BIN __complete $command releasename $@
+        ;;
+    "template" | "install" | "upgrade" )
+        $HELM_BIN __complete $command releasename chardir/ $@
+        ;;
+    "list" | "ls" )
+        $HELM_BIN __complete $command $@
+        ;;
+    "alter" | "restart" )
+        exit 0
+        ;;
+    * )
+        exit 0
+        ;;
+esac

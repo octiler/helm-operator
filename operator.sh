@@ -2,18 +2,20 @@
 set -e
 
 function err () {
-    [[ 0 -lt $1 ]] && errcode=$1 && shift || errcode=127
+    local errcode=127
+    [[ 0 -lt $1 ]] && errcode=$1 && shift
     echo $@ >&2 && exit $errcode
 }
 
 [[ ${#DEVOPS_ROOTPATH} -gt 0 ]] || err please specify environment variable DEVOPS_ROOTPATH
-DEVOPS_ROOTPATH=`realpath $DEVOPS_ROOTPATH`
+# DEVOPS_ROOTPATH=`realpath $DEVOPS_ROOTPATH`
 yq -V | grep -q mikefarah || err please install yq utilities
-# local 是否向下传递
 
 function usage () {
 cat << EOF
 maintain helm release within a git repository.
+
+helm operator COMMAND REFERENCE [--dry-run ][FLAGS ... ][-- ][FLAGS ...]
 EOF
 }
 
@@ -28,6 +30,14 @@ while [[ $# -gt 0 ]];do
             ;;
         --dry-run)
             DRYRUN=TRUE
+            shift
+            ;;
+        --classified)
+            CLASSIFIED=TRUE
+            shift
+            ;;
+        --mock)
+            MOCK=mock
             shift
             ;;
         --)
@@ -52,9 +62,10 @@ COMMAND=${PASSTHRU[0]}
 # COMMAND=$1
 shift
 
+readonly cubeconfig=`realpath ~/.kube/config`
 declare -A map=(
     [domain]="polymer"
-    [kubeconfig]=`realpath ~/.kube/config`
+    [kubeconfig]="$cubeconfig"
     [refvalues]=values.yaml
 )
 
@@ -73,7 +84,7 @@ function locate_values () {
     [[ ${#map[refvalues]} -eq 0 ]] || [[ -f ${map[refvalues]} ]] || map[refvalues]=""
     [[ ${#map[overrides]} -eq 0 ]] && locate_overrides
     [[ ${#map[overrides]} -gt 0 ]] && [[ -f ${map[overrides]} ]] || err 110 overrides values file not exist
-    map[releasename]=`yq '.nameOverride // ""' ${map[overrides]}`
+    map[releasename]=`yq '.fullnameOverride // ""' ${map[overrides]}`
     map[namespace]=`yq '.namespaceOverride // ""' ${map[overrides]}`
     [[ ${#map[releasename]} -gt 0 ]] || err 110 releasename not specified
     [[ ${#map[namespace]} -gt 0 ]] || err 110 namespace not specified
@@ -93,6 +104,7 @@ function locate_kubeconfig () {
 
 function guess () {
     [[ "true" == `git rev-parse --is-inside-work-tree` ]] || err 111 not a git repository
+    git rev-parse --show-toplevel | grep -q "^${DEVOPS_ROOTPATH%/}/${map[domain]}/" || err git repository not cloned in proper place
     local domainProject=$(git rev-parse --show-toplevel | sed "s#^${DEVOPS_ROOTPATH%/}/##")
     [[ "${domainProject#/}" == "${domainProject}" ]] || err 111 not a regular git repository
     local domain=${domainProject%%/*}
@@ -108,7 +120,7 @@ locate_values $ref
 guess
 
 if [[ "$DRYRUN" == "TRUE" ]];then
-cat << EOF
+cat << EOF >&2
 ------------------------------------------------------------
 PWD:            `pwd`
 DEVOPS_ROOT:    ${DEVOPS_ROOTPATH}
@@ -133,20 +145,23 @@ fi
 [[ ${#map[namespace]} -gt 0 ]] || err 112 namespace not specified in values
 [[ ${#map[releasename]} -gt 0 ]] || err 112 releasename not specified in values
 
+EVALFLAG="FALSE"
 case $COMMAND in
     "history" | "hist" | "rollback" | "status" | "test" | "uninstall" )
-        helmCommand="helm \
-                    --kubeconfig ${map[kubeconfig]}\
+        helmCommand=`echo " \
+                    helm \
+                    --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
                     $COMMAND \
                     ${map[releasename]} \
                     $@ ${OPTIONS[@]} \
-                    "
+                    " | column -to " "`
         ;;
     "template" | "install" | "upgrade" )
-        helmCommand="helm \
-                    --kubeconfig ${map[kubeconfig]}\
+        helmCommand=`echo " \
+                    helm \
+                    --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
                     $COMMAND \
@@ -154,22 +169,57 @@ case $COMMAND in
                     ${map[refvalues]:+-f }${map[refvalues]} \
                     -f ${map[overrides]} \
                     ${map[chart]} \
+                    --post-renderer helm \
+                    --post-renderer-args revisor \
+                    ${CLASSIFIED:+--post-renderer-args }${CLASSIFIED:+--classified} \
+                    ${MOCK:+--post-renderer-args }${MOCK} \
                     $@ ${OPTIONS[@]} \
-                    "
+                    " | column -to " "`
         ;;
     "list" | "ls" )
-        helmCommand="helm \
-                    --kubeconfig ${map[kubeconfig]}\
+        helmCommand=`echo " \
+                    helm \
+                    --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
                     $COMMAND \
                     $@ ${OPTIONS[@]} \
-                    "
+                    " | column -to " "`
         ;;
+    "restart" )
+        helmCommand=` \
+                    helm \
+                    --kubeconfig ${map[kubeconfig]} \
+                    --kube-context ${map[world]} \
+                    -n ${map[namespace]} \
+                    template \
+                    ${map[releasename]} \
+                    ${map[refvalues]:+-f }${map[refvalues]} \
+                    -f ${map[overrides]} \
+                    ${map[chart]} \
+                    | \
+                    yq ea '. as \$item ireduce ([]; . + [ \$item | select(["Deployment","StatefulSet","DaemonSet"] | contains([\$item.kind])) ])' \
+                    | \
+                    KUBECONFIG=${map[kubeconfig]} KUBECONTEXT=${map[world]} \
+                    yq 'map(["kubectl", "--kubeconfig ${KUBECONFIG}"|envsubst(ne), "--context ${KUBECONTEXT}"|envsubst(ne), "-n", .metadata.namespace, "rollout restart", .kind, .metadata.name] | join(" ")) + \
+                        map(["kubectl", "--kubeconfig ${KUBECONFIG}"|envsubst(ne), "--context ${KUBECONTEXT}"|envsubst(ne), "-n", .metadata.namespace, "rollout status -w", .kind, .metadata.name] | join(" "))' \
+                    | \
+                    yq 'join(" && \\\n")' \
+                    `
+        EVALFLAG="TRUE"
+        ;;
+    "alter" )
+        [[ "$kubeconfig" == ${map[kubeconfig]} ]] || err 126 there is no context named with ${map[world]} in ${map[kubeconfig]}
+        helmCommand=`echo " \
+            kubectx ${map[world]} \
+            && \
+            kubens ${map[namespace]} \
+            " | column -to " "`
+        EVALFLAG="TRUE"
     * )
         echo "not a valid command"
         exit 1
         ;;
 esac
 
-[[ "TRUE" == "$DRYRUN" ]] && echo ${helmCommand} || ${helmCommand}
+[[ "TRUE" == "$DRYRUN" ]] && echo "${helmCommand}" || ( [[ $EVALFLAG == "TRUE" ]] && eval "${helmCommand}" || ${helmCommand} )
