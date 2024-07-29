@@ -159,6 +159,7 @@ case $COMMAND in
                     " | column -to " "`
         ;;
     "template" | "install" | "upgrade" )
+        [[ ${#MOCK} -gt 0 ]] && [[ ${COMMAND} != template ]] && DRYRUN="TRUE"
         helmCommand=`echo " \
                     helm \
                     --kubeconfig ${map[kubeconfig]} \
@@ -209,13 +210,14 @@ case $COMMAND in
         EVALFLAG="TRUE"
         ;;
     "alter" )
-        [[ "$kubeconfig" == ${map[kubeconfig]} ]] || err 126 there is no context named with ${map[world]} in ${map[kubeconfig]}
+        [[ "$cubeconfig" == ${map[kubeconfig]} ]] || err 126 there is no context named with ${map[world]} in ${map[kubeconfig]}
         helmCommand=`echo " \
             kubectx ${map[world]} \
             && \
             kubens ${map[namespace]} \
             " | column -to " "`
         EVALFLAG="TRUE"
+        ;;
     * )
         echo "not a valid command"
         exit 1

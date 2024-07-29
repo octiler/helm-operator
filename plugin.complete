@@ -22,7 +22,7 @@ case $command in
         $HELM_BIN __complete $command releasename $@
         ;;
     "template" | "install" | "upgrade" )
-        $HELM_BIN __complete $command releasename chardir/ $@
+        $HELM_BIN __complete $command releasename chartdir/ $@
         ;;
     "list" | "ls" )
         $HELM_BIN __complete $command $@
