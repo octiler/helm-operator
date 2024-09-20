@@ -12,6 +12,10 @@ test
 history
 rollback
 uninstall
+diff-release
+diff-revision
+diff-rollback
+diff-upgrade
 EOF
 
 command=$1 && shift

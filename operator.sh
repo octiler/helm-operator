@@ -147,25 +147,25 @@ fi
 
 EVALFLAG="FALSE"
 case $COMMAND in
-    "history" | "hist" | "rollback" | "status" | "test" | "uninstall" )
+    "history" | "hist" | "rollback" | "status" | "test" | "uninstall" | "diff-release" | "diff-revision" | "diff-rollback" )
         helmCommand=`echo " \
                     helm \
                     --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
-                    $COMMAND \
+                    ${COMMAND//-/ } \
                     ${map[releasename]} \
                     $@ ${OPTIONS[@]} \
                     " | column -to " "`
         ;;
-    "template" | "install" | "upgrade" )
+    "template" | "install" | "upgrade" | "diff-upgrade" )
         [[ ${#MOCK} -gt 0 ]] && [[ ${COMMAND} != template ]] && DRYRUN="TRUE"
         helmCommand=`echo " \
                     helm \
                     --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
-                    $COMMAND \
+                    ${COMMAND//-/ } \
                     ${map[releasename]} \
                     ${map[refvalues]:+-f }${map[refvalues]} \
                     -f ${map[overrides]} \
