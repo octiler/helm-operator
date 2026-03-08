@@ -2,14 +2,14 @@
 set -e
 
 function err () {
-    local errcode=127
-    [[ 0 -lt $1 ]] && errcode=$1 && shift
+    [[ 0 -lt $1 ]] && errcode=$1 && shift || errcode=127
     echo $@ >&2 && exit $errcode
 }
 
 [[ ${#DEVOPS_ROOTPATH} -gt 0 ]] || err please specify environment variable DEVOPS_ROOTPATH
-# DEVOPS_ROOTPATH=`realpath $DEVOPS_ROOTPATH`
+DEVOPS_ROOTPATH=`realpath $DEVOPS_ROOTPATH`
 yq -V | grep -q mikefarah || err please install yq utilities
+# local 是否向下传递
 
 function usage () {
 cat << EOF
@@ -161,21 +161,24 @@ case $COMMAND in
     "template" | "install" | "upgrade" | "diff-upgrade" )
         [[ ${#MOCK} -gt 0 ]] && [[ ${COMMAND} != template ]] && DRYRUN="TRUE"
         helmCommand=`echo " \
-                    helm \
+                    cat ${map[overrides]} \
+                    | helm revisor ${CLASSIFIED:+--classified} ${MOCK} \
+                    | helm \
                     --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
                     ${COMMAND//-/ } \
                     ${map[releasename]} \
                     ${map[refvalues]:+-f }${map[refvalues]} \
-                    -f ${map[overrides]} \
+                    -f - \
                     ${map[chart]} \
-                    --post-renderer helm \
+                    --post-renderer kubectl \
                     --post-renderer-args revisor \
                     ${CLASSIFIED:+--post-renderer-args }${CLASSIFIED:+--classified} \
                     ${MOCK:+--post-renderer-args }${MOCK} \
                     $@ ${OPTIONS[@]} \
                     " | column -to " "`
+        EVALFLAG="TRUE"
         ;;
     "list" | "ls" )
         helmCommand=`echo " \
@@ -189,14 +192,16 @@ case $COMMAND in
         ;;
     "restart" )
         helmCommand=` \
-                    helm \
+                    cat ${map[overrides]} \
+                    | helm revisor ${CLASSIFIED:+--classified} ${MOCK} \
+                    | helm \
                     --kubeconfig ${map[kubeconfig]} \
                     --kube-context ${map[world]} \
                     -n ${map[namespace]} \
                     template \
                     ${map[releasename]} \
                     ${map[refvalues]:+-f }${map[refvalues]} \
-                    -f ${map[overrides]} \
+                    -f - \
                     ${map[chart]} \
                     | \
                     yq ea '. as \$item ireduce ([]; . + [ \$item | select(["Deployment","StatefulSet","DaemonSet"] | contains([\$item.kind])) ])' \
@@ -205,17 +210,17 @@ case $COMMAND in
                     yq 'map(["kubectl", "--kubeconfig ${KUBECONFIG}"|envsubst(ne), "--context ${KUBECONTEXT}"|envsubst(ne), "-n", .metadata.namespace, "rollout restart", .kind, .metadata.name] | join(" ")) + \
                         map(["kubectl", "--kubeconfig ${KUBECONFIG}"|envsubst(ne), "--context ${KUBECONTEXT}"|envsubst(ne), "-n", .metadata.namespace, "rollout status -w", .kind, .metadata.name] | join(" "))' \
                     | \
-                    yq 'join(" && \\\n")' \
+                    yq 'join(" && \\\\\n")' \
                     `
         EVALFLAG="TRUE"
         ;;
     "alter" )
         [[ "$cubeconfig" == ${map[kubeconfig]} ]] || err 126 there is no context named with ${map[world]} in ${map[kubeconfig]}
         helmCommand=`echo " \
-            kubectx ${map[world]} \
-            && \
-            kubens ${map[namespace]} \
-            " | column -to " "`
+                    kubectx ${map[world]} \
+                    && \
+                    kubens ${map[namespace]} \
+                    " | column -to " "`
         EVALFLAG="TRUE"
         ;;
     * )
